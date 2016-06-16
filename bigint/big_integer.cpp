@@ -1,370 +1,244 @@
-
 #include <iostream>
-#include <vector>
-#include <stdexcept>
 #include <algorithm>
-#include <memory.h>
-#include <cstring>
-#include <stdexcept>
-#include <stdint.h>
+#include <vector>
 #include "big_integer.h"
 
-int big_integer::sz() const {
-	return bits;
-}
+big_integer::big_integer() : big_integer(0) {}
 
-void big_integer::check_zero() {
-	int z = true;
-	for (int i = 0; i < sz(); ++i) {
-		if (num[i]) {
-			z = false; break;
-		}
-	}
-	if (z) sgn = true;
-}
-
-int big_integer::n_bits() const {
-	int k = bits - 1;
-	while (k > 0 && !num[k]) --k;
-	return ++k;
-}
-
-void big_integer::reserve(int k) {
-	if (k > (int) bits) {
-		uint64_t* buffer = new uint64_t[bits];
-		memcpy(buffer, num, bits * sizeof(uint64_t));
-		num = new uint64_t[k * 2];
-		memset(num, 0, sizeof(uint64_t) * k * 2);
-		memcpy(num, buffer, bits * sizeof(uint64_t));
-		bits = k * 2;
-		delete buffer;
-	}
-}
-
-void big_integer::clean() {
-	int non_empty = n_bits();
-	non_empty = std::max(non_empty + 1, 2);
-	if (non_empty * 4 < (int) bits) {
-		uint64_t *buffer = new uint64_t[non_empty * 2];
-		memcpy(buffer, num, non_empty * 2 * sizeof(uint64_t));
-		num = new uint64_t[non_empty * 2];
-		memcpy(num, buffer, non_empty * 2 * sizeof(uint64_t));
-		bits = non_empty * 2;
-		delete buffer;
-	}
-}
-
-big_integer::big_integer() {
-	*this = 0;
-}
-
-big_integer::big_integer(int value) {
-	sgn = (value >= 0);
-	num = new uint64_t[10];
-	memset(num, 0, 10 * sizeof(uint64_t));
-	num[0] = abs(value);
-	bits = 10;
-}
+big_integer::big_integer(int value)
+	: sgn(0 <= value),
+	  vec(1, std::abs((int64_t)value)) {}
 
 big_integer::big_integer(big_integer const& other) {
-	*this = other;
+	vec.resize(other.vec.size());
+	copy(other.vec.begin(), other.vec.end(), vec.begin());
+	sgn = other.sgn;
 }
 
 big_integer::~big_integer() {
-	delete num;
+	vec.clear();
 }
 
 big_integer::big_integer(std::string const& str) {
-	int local_base = 1000;
-	int c = 0;
-	uint64_t *dem = new uint64_t[str.size()];
-	if (str[c] == '-') {
-		sgn = false;
-		++c;
-	} else {
-		sgn = true;
+	vec = {0};
+	ui64 base = 10;
+	std::vector<ui64> demical;
+
+	for (int i = (int) str.size()-1; i >= 0; --i) {
+		if (str[i] != '-')
+			demical.push_back(str[i] - '0');
 	}
-	int iter = 0;
-	for (int i = str.size() - 1; i >= c; i -= 3) {
-		uint32_t dig = str[i] - '0';
-		if (i - 1 >= c) dig += (str[i - 1] - '0') * 10;
-		if (i - 2 >= c) dig += (str[i - 2] - '0') * 100;
-		dem[iter++] = dig;
-	}
-	int mx = str.size() / 7 + 1;
-	num = new uint64_t[mx];
-	bits = mx;
-	memset(num, 0, mx * sizeof(uint64_t));
-	int ptr = 0;
-	int ind = 1;
-	while (iter > 0 && !dem[iter - 1]) --iter;
-	while (iter > 0) {
-		if (ptr == 32) {
-			++ind;
-			ptr = 0;
+
+	ui64 ptr = 0;
+	while (demical.size() > 1 || demical.back()) {
+		if (demical[0] & 1) {
+			vec.back() |= (1UL << ptr);
 		}
-		if (dem[0] & 1) {
-			num[ind - 1] |= (1ll << ptr);
-		}
-		for (int i = iter - 1; i >= 0; --i) {
-			if (i) dem[i - 1] += (dem[i] & 1) * local_base;
-			dem[i] >>= 1;
-		}
-		while (iter > 0 && !dem[iter - 1]) --iter;
 		++ptr;
+		div_long_short(demical, base, 2);
+		if (ptr == 32) {
+			ptr = 0;
+			vec.push_back(0);
+		}
 	}
-	delete dem;
-	clean();
-	check_zero();
+	sgn = (str[0] != '-');
+	del_zeros(vec); verify_sign();
 }
 
-big_integer& big_integer::operator=(big_integer const& other) {
-	uint64_t *buffer = new uint64_t[other.sz()];
-	memcpy(buffer, other.num, other.sz() * sizeof(uint64_t));
-	num = new uint64_t[other.sz()];
-	memcpy(num, buffer, sizeof(uint64_t) * other.sz());
-	sgn = other.sgn;
-	bits = other.bits;
-	delete buffer;
-	return *this;
-}
+big_integer& big_integer::operator=(big_integer const& other) = default;
 
 big_integer& big_integer::operator+=(big_integer const& other) {
-	if (other == 0) {
-		return *this;
-	}
-	if (*this == 0) {
-		return *this = other;
-	}
 	if (sgn == other.sgn) {
-		int n = std::max(n_bits(), other.n_bits()) + 1;
-		reserve(n);
-		for (int i = 0; i < n; ++i) {
-			uint64_t val = (i < other.sz() ? other.num[i] : 0);
-			num[i] += val;
-			num[i + 1] += num[i] / BASE;
-			num[i] %= BASE;
+
+		vec.resize(std::max(vec.size(), other.vec.size())+1);
+		for (size_t i = 0; i != vec.size()-1; ++i) {
+			vec[i] += other.element(i);
+			push(vec, i);
 		}
+		del_zeros(vec);
+
 	} else {
 		if (sgn) {
 			*this -= (-other);
 		} else {
-			*this = -*this;
-			*this -= other;
-			*this = -*this;
+			*this = -(-*this - other);
 		}
 	}
-	clean();
-	check_zero();
 	return *this;
 }
 
 big_integer& big_integer::operator-=(big_integer const& other) {
-	if (other == 0) {
-		return *this;
-	}
-	if (*this == 0) {
-		return *this = -other;
-	}
 	if (sgn == other.sgn) {
-		int n = std::max(n_bits(), other.n_bits()) + 1;
-		int64_t *buffer = new int64_t[n];
-		memset(buffer, 0, sizeof(int64_t) * n);
-		reserve(n);
-		for (int i = 0; i < n - 1; ++i) {
-			buffer[i] += num[i] - (i < other.sz() ? other.num[i] : 0);
-			if (buffer[i] < 0) {
-				buffer[i + 1]--;
-				buffer[i] += BASE;
-			}
+
+		int n = std::max(vec.size(), other.vec.size());
+		vec.resize(n);
+
+		int carry = 0;
+		for (int i = 0; i < n; ++i) {
+			int64_t val = (int64_t) element(i) - other.element(i) - carry;
+			carry = (val < 0);
+			vec[i] = (val + BASE) % BASE;
 		}
-		if (buffer[n - 1] < 0) {
+
+		if (carry) {
+			carry = 0;
 			sgn ^= 1;
 			for (int i = 0; i < n; ++i) {
-				buffer[i] = -buffer[i];
-			}
-			for (int i = n-2; i >= 0; --i) {
-				if (buffer[i] < 0) {
-					buffer[i] += BASE;
-					buffer[i + 1]--;
-				}
+				int64_t val = -(int64_t) element(i) - carry;
+				carry = (val < 0);
+				vec[i] = (val + BASE) % BASE;
 			}
 		}
-		memcpy(num, buffer, sizeof(uint64_t) * n);
-		delete buffer;
+
+		del_zeros(vec); verify_sign();
 	} else {
 		if (sgn) {
 			*this += -other;
 		} else {
-			sgn ^= 1;
-			*this += other;
-			sgn ^= 1;
+			*this = -(-*this + other);
 		}
 	}
-	clean();
-	check_zero();
 	return *this;
 }
+
+
+
 
 big_integer& big_integer::operator*=(big_integer const& other) {
-	int x = n_bits();
-	int y = other.n_bits();
-	int n = x + y;
-	uint64_t *buffer = new uint64_t[n];
-	memset(buffer, 0, sizeof(uint64_t) * n);
-	for (int i = 0; i < x; ++i) {
-		for (int j = 0; j < y; ++j) {
-			buffer[i + j] += num[i] * other.num[j];
-			buffer[i + j + 1] += (buffer[i + j] >> 32);
-			buffer[i + j] %= BASE;
+
+	std::vector<ui64> buf(vec.size() + other.vec.size());
+
+	for (size_t i = 0; i != vec.size(); ++i) {
+		for (size_t j = 0; j != other.vec.size(); ++j) {
+			buf[i+j] += vec[i] * other.vec[j];
+			push(buf, i+j);
 		}
 	}
-	for (int i = 0; i < n - 1; ++i) {
-		buffer[i + 1] += buffer[i] / BASE;
-		buffer[i] %= BASE;
+	vec = buf;
+	for (size_t i = 0; i != vec.size()-1; ++i) {
+		push(vec, i);
 	}
-	reserve(n);
-	memcpy(num, buffer, sizeof(uint64_t) * n);
-	delete buffer;
-	if (sgn == other.sgn) {
-		sgn = true;
-	} else {
-		sgn = false;
-	}
-	check_zero();
+	sgn = !(sgn ^ other.sgn);
+	del_zeros(vec); verify_sign();
+
 	return *this;
 }
 
+
+
 big_integer& big_integer::operator/=(big_integer const& other) {
-	if (*this == 0) return *this;
-	int x = n_bits();
-	int y = other.n_bits();
-	int n = x + y;
-	uint64_t *cur_value = new uint64_t[n];
-	uint64_t *buffer = new uint64_t[n];
-	uint64_t *ans = new uint64_t[x];
-	memset(cur_value, 0, sizeof(uint64_t) * n);
-	memset(ans, 0, sizeof(uint64_t) * x);
-	int c;
-	for (int i = x - y; i >= 0; --i) {
-		uint64_t l = 0, r = BASE;
+
+	int n = vec.size();
+	int m = other.vec.size();
+
+	std::vector<ui64> cur;
+	std::vector<ui64> ans(n-m+1);
+
+	for (int i = n-m; i >= 0; --i) {
+		ui64 l = 0;
+		double a = other.element(m-1) + other.element(m-2) * 1.0 / BASE;
+		double b = element(i+m-1) + element(i+m) * BASE;
+		ui64 r = b / a + 2;
+
+		l = std::max(0, int(r - 3));
+
 		while (l + 1 < r) {
-			uint64_t mid = (l + r) / 2;
-			memcpy(buffer, cur_value, sizeof(uint64_t) * n);
-			for (c = i; c - i < y; ++c) {
-				buffer[c] += other.num[c - i] * mid;
-				buffer[c + 1] += (buffer[c] >> 32);
-				buffer[c] = (uint32_t) buffer[c];
-			}
-			if ((buffer[c] >> 32) != 0) {
-				buffer[c + 1] += (buffer[c] >> 32);
-				buffer[c] = (uint32_t) buffer[c];
-				++c;
-			}
-			for (int j = n - 1; j >= 0; --j) {
-				uint64_t number = (j < sz() ? num[j] : 0);
-				if (number < buffer[j]) {
-					r = mid;
-					break;
-				}
-				if (number > buffer[j]) {
-					l = mid;
-					break;
+			ui64 m = (l+r) / 2;
+			cur = other.vec;
+			mul_long_short(cur, BASE, m);
+
+			// fast check or ((m * other) << 32 * i) <= *this
+
+			bool less_or_equal = true;
+			if (cur.size() + i != vec.size()) {
+				if (cur.size() + i > vec.size()) less_or_equal = false;
+			} else {
+				for (int j = cur.size()-1; j >= 0; --j) {
+					if (vec[j+i] != cur[j]) {
+						if (cur[j] > vec[j+i]) less_or_equal = false;
+						break;
+					}
 				}
 			}
-			if (l != mid && r != mid) l = mid;
+			if (less_or_equal) {
+				l = m;
+			} else {
+				r = m;
+			}
 		}
+
+		// fast subtracts (cur << 32*i) from *this
+		cur = other.vec;
+		mul_long_short(cur, BASE, l);
+		int64_t carry = 0;
+		for (size_t j = 0; j != cur.size(); ++j) {
+			int64_t val = (int64_t) vec[i+j] - cur[j] -carry;
+			carry = (val < 0);
+			vec[i+j] = (val + BASE) % BASE;
+		}
+		if (carry) {
+			vec[cur.size()+i]--;
+		}
+		del_zeros(vec);
+
 		ans[i] = l;
-		for (c = i; c < i + y; ++c) {
-			cur_value[c] += other.num[c - i] * l;
-			cur_value[c + 1] += (cur_value[c] >> 32);
-			cur_value[c] = (uint32_t) cur_value[c];
-		}
-		if ((cur_value[c] >> 32) != 0) {
-			cur_value[c + 1] += (cur_value[c] >> 32);
-			cur_value[c] = (uint32_t) cur_value[c];
-			++c;
-		}
 	}
-	sgn = (sgn == other.sgn);
-	memset(num, 0, sizeof(uint64_t) * sz());
-	memcpy(num, ans, x * sizeof(uint64_t));
-	check_zero();
-	delete buffer;
-	delete ans;
-	delete cur_value;
+	vec = ans;
+	if (vec.empty()) {
+		vec.push_back(0);
+	}
+	sgn = !(sgn ^ other.sgn);
+	del_zeros(vec); verify_sign();
 	return *this;
 }
 
 big_integer& big_integer::operator%=(big_integer const& other) {
-	if (other == 0) {
-		throw std::runtime_error("taking modulo by zero!!!");
-	}
 	big_integer a = *this;
 	a /= other;
 	a *= other;
-	*this -= a;
-	clean();
-	check_zero();
-	return *this;
+	return *this -= a;
 }
 
-uint64_t binary_and(uint64_t a, uint64_t b) {
+ui64 _and(ui64 a, ui64 b) {
 	return a & b;
 }
 
-uint64_t binary_or(uint64_t a, uint64_t b) {
+ui64 _or(ui64 a, ui64 b) {
 	return a | b;
 }
 
-uint64_t binary_xor(uint64_t a, uint64_t b) {
+ui64 _xor(ui64 a, ui64 b) {
 	return a ^ b;
 }
 
-void big_integer::binary_oper(big_integer const& other, uint64_t (*func)(uint64_t, uint64_t)) {
-	int n = std::max(n_bits(), other.n_bits()) + 1;
-	big_integer b = other;
-	b.reserve(n);
-	reserve(n);
-	for (int i = 0; i < n; ++i) {
-		if (!sgn) num[i] = uint32_t(~num[i]);
-		if (!b.sgn) b.num[i] = uint32_t(~b.num[i]);
+void big_integer::apply_binary(big_integer const& other, ui64 (*func)(ui64, ui64)) {
+	big_integer b(other);
+	ui64 first = (sgn ? 0 : BASE-1);
+	ui64 second = (b.sgn ? 0 : BASE-1);
+	to_byte();
+	b.to_byte();
+	size_t n = std::max(vec.size(), b.vec.size());
+	for (size_t i = 0; i != n; ++i) {
+		if (i == vec.size())
+			vec.push_back(first);
+		vec[i] = (*func)(vec[i], (i < b.vec.size() ? b.vec[i] : second));
 	}
-	if (!sgn) {
-		sgn = true;
-		++*this;
-	}
-	if (!b.sgn) {
-		b.sgn = true;
-		++b;
-	}
-	for (int i = 0; i < n; ++i) {
-		num[i] = (*func)(num[i], b.num[i]);
-	}
-	if ((num[n - 1] & ((uint32_t)1 << 31)) != 0) {
-		--*this;
-		for (int i = 0; i < n; ++i) {
-			num[i] = uint32_t(~num[i]);
-		}
-		sgn = false;
-	}
-	~b;
-	clean();
-	check_zero();
+	from_byte();
+	del_zeros(vec); verify_sign();
 }
 
 big_integer& big_integer::operator&=(big_integer const& other) {
-	(*this).binary_oper(other, binary_and);
+	apply_binary(other, _and);
 	return *this;
 }
 
 big_integer& big_integer::operator|=(big_integer const& other) {
-	(*this).binary_oper(other, binary_or);
+	apply_binary(other, _or);
 	return *this;
 }
 
 big_integer& big_integer::operator^=(big_integer const& other) {
-	(*this).binary_oper(other, binary_xor);
+	apply_binary(other, _xor);
 	return *this;
 }
 
@@ -375,16 +249,13 @@ big_integer big_integer::operator+() const {
 big_integer big_integer::operator~() const {
 	big_integer ret = *this;
 	ret = -ret - 1;
-	ret.clean();
-	ret.check_zero();
 	return ret;
 }
 
 big_integer big_integer::operator-() const {
 	big_integer ret = *this;
-	if (ret != 0) {
-		ret.sgn ^= 1;
-	}
+	ret.sgn ^= 1;
+	ret.verify_sign();
 	return ret;
 }
 
@@ -411,82 +282,51 @@ big_integer big_integer::operator--(int) {
 }
 
 big_integer& big_integer::operator>>=(int shift) {
-	int big_shift = shift / 32;
-	int small_shift = shift % 32;
-	int n = n_bits() + 1;
-	reserve(n);
-	bool c = sgn;
-	sgn = true;
-	if (!c) {
-		for (int i = 0; i < n; ++i) {
-			num[i] = uint32_t(~num[i]);
+	int big_shift = shift / BASEPOW;
+	int small_shift = shift % BASEPOW;
+	ui64 val = (sgn ? 0 : BASE-1);
+	to_byte();
+	for (int i = 0; i + big_shift < (int) vec.size(); ++i) {
+		vec[i] = vec[i + big_shift];
+		if (big_shift) {
+			vec[i + big_shift] = val;
 		}
-		++*this;
-	}
-	for (int i = 0; i + big_shift < n; ++i) {
-		num[i] = num[i + big_shift];
-		uint64_t remain = num[i] % ((uint32_t) 1 << small_shift);
 		if (i) {
-			num[i - 1] |= (remain << (32 - small_shift));
+			vec[i-1] %= (1UL << (32 - small_shift));
+			vec[i-1] |= ((vec[i] % (1UL << small_shift)) << (32-small_shift));
 		}
-		num[i] >>= small_shift;
+		vec[i] >>= small_shift;
+		vec[i] |= (val << (32 - small_shift)) % BASE;
 	}
-	for (int i = n - big_shift; i < n; ++i) {
-		if (c) num[i] = 0;
-		else num[i] = BASE - 1;
-	}
-	int ind = n - 1 - big_shift;
-	if (ind >= 0) {
-		if (c) {
-			num[ind] <<= (small_shift + 32);
-			num[ind] >>= (small_shift + 32);
-		} else {
-			num[ind] |= uint32_t(((1 << small_shift) - 1) << (32 - small_shift));
-		}
-	}
-	if ((num[n - 1] & (1ll << 31)) != 0) {
-		--*this;
-		for (int i = 0; i < n; ++i) {
-			num[i] = uint32_t(~num[i]);
-		}
-	}
-	sgn = c;
-	clean();
-	check_zero();
+	from_byte();
+	del_zeros(vec);
 	return *this;
 }
 
 big_integer& big_integer::operator<<=(int shift) {
-	int big_shift = shift / 32;
-	int small_shift = shift % 32;
-	int n = n_bits() + big_shift + 1;
-	reserve(n);
+	int big_shift = shift / BASEPOW;
+	int small_shift = shift % BASEPOW;
+
+	int n = vec.size() + big_shift + 1;
+	vec.resize(n);
+
 	for (int i = n-2; i >= big_shift; --i) {
-		num[i] = num[i - big_shift];
-		uint32_t remain = num[i] >> (32 - small_shift);
-		num[i + 1] |= remain;
-		num[i] = uint32_t(num[i] << small_shift);
+		vec[i] = vec[i - big_shift];
+		if (big_shift)
+			vec[i - big_shift] = 0;
+		vec[i + 1] |= (vec[i] >> (32 - small_shift));
+		vec[i] = (vec[i] << small_shift)%BASE;
 	}
-	clean();
-	check_zero();
+	del_zeros(vec);
 	return *this;
 }
 
 int compare(big_integer const& a, big_integer const& b) {
-    if (a.sgn != b.sgn) {
-		return (a.sgn > b.sgn) ? 1 : -1;
-    }
-    int n = std::max(a.sz(), b.sz());
-    for (int i = n - 1; i >= 0; --i) {
-		uint64_t first = (i < a.sz() ? a.num[i] : 0),
-		second = (i < b.sz() ? b.num[i] : 0);
-
-		if (first < second) {
-			return a.sgn ? -1 : 1;
-		}
-		if (first > second) {
-			return a.sgn ? 1 : -1;
-		}
+	big_integer ret = a - b;
+	if (!ret.sgn) {
+		return -1;
+	} else if (ret.sz() > 1 || ret.element(0)) {
+		return 1;
 	}
 	return 0;
 }
@@ -515,104 +355,165 @@ bool operator>=(big_integer const &a, big_integer const& b) {
 	return compare(a, b) != -1;
 }
 
-big_integer operator+(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	ret += b;
-	return ret;
+big_integer operator+(big_integer a, big_integer const& b) {
+	return a += b;
 }
 
-big_integer operator-(big_integer const &a, big_integer const& b) {
-	big_integer ret = a;
-	ret -= b;
-	return ret;
+big_integer operator-(big_integer a, big_integer const& b) {
+	return a -= b;
 }
 
-big_integer operator*(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	ret *= b;
-	return ret;
+big_integer operator*(big_integer a, big_integer const& b) {
+	return a *= b;
 }
 
-big_integer operator/(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	ret /= b;
-	return ret;
+big_integer operator/(big_integer a, big_integer const& b) {
+	return a /= b;
 }
 
-big_integer operator%(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	ret %= b;
-	return ret;
+big_integer operator%(big_integer a, big_integer const& b) {
+	return a %= b;
 }
 
-big_integer operator&(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	return ret &= b;
+big_integer operator&(big_integer a, big_integer const& b) {
+
+	return a &= b;
 }
 
-big_integer operator|(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	return ret |= b;
+big_integer operator|(big_integer a, big_integer const& b) {
+	return a |= b;
 }
 
-big_integer operator^(big_integer const& a, big_integer const& b) {
-	big_integer ret = a;
-	return ret ^= b;
+big_integer operator^(big_integer a, big_integer const& b) {
+	return a ^= b;
 }
 
-big_integer operator<<(big_integer const& a, int b) {
-	big_integer ret = a;
-	return ret <<= b;
+big_integer operator<<(big_integer a, int b) {
+	return a <<= b;
 }
 
-big_integer operator>>(big_integer const& a, int b) {
-	big_integer ret = a;
-	return ret >>= b;
+big_integer operator>>(big_integer a, int b) {
+	return a >>= b;
 }
 
 std::string to_string(big_integer const& a) {
+	ui64 base = 10;
+	std::vector<ui64> demical(1, 0);
+	std::string ret;
 
-	int local_base = 1000;
-	int n = 4 * a.sz();
-	uint32_t *dem = new uint32_t[n];
-	memset(dem, 0, sizeof(uint32_t) * n);
-	for (int i = a.sz() - 1; i >= 0; --i) {
-		for (int j = 31; j >= 0; --j) {
-			int carry = 0;
-			for (int k = 0; k < n - 1; ++k) {
-				(dem[k] <<= 1) += carry;
-				carry = dem[k] / local_base;
-				dem[k] %= local_base;
-			}
-			if (((1 << j) & a.num[i])) {
-				dem[0]++;
-			}
-		}
+	for (int i = a.sz()-1; i >= 0; --i) {
+		mul_long_short(demical, base, BASE);
+		add_long_short(demical, base, a.element(i));
 	}
-	int carry = 0;
-	for (int i = 0; i < n; ++i) {
-		dem[i] += carry;
-		carry = dem[i] / local_base;
-		dem[i] %= local_base;
+
+	std::reverse(demical.begin(), demical.end());
+	for (auto digit : demical) {
+		ret += std::to_string(digit);
 	}
-	while (n >= 1 && !dem[n - 1]) --n;
-	std::string r("");
-	if (!a.sgn) r = "-";
-	r += std::to_string(dem[n - 1]);
-	for (int i = n - 2; i >= 0; --i) {
-		std::string buff("");
-		for (int j = 0; j < 3; ++j) {
-			buff += (dem[i] % 10 + '0');
-			dem[i] /= 10;
-		}
-		std::reverse(buff.begin(), buff.end());
-		r += buff;
+
+	if (!a.get_sgn()) {
+		ret = "-" + ret;
 	}
-	delete dem;
-	return r;
+
+	return ret;
 }
 
 std::ostream& operator<<(std::ostream& s, big_integer const& a)
 {
     return s << to_string(a);
 }
+
+ui64 big_integer::element(int pos) const {
+	return ((0 <= pos && pos < (int) vec.size()) ? vec[pos] : 0);
+}
+
+int big_integer::sz() const {
+	return vec.size();
+}
+
+bool big_integer::get_sgn() const {
+	return sgn;
+}
+
+void push(std::vector<ui64>& a, int pos) {
+	a[pos+1] += a[pos] / BASE;
+	a[pos] %= BASE;
+}
+
+void del_zeros(std::vector<ui64>& a) {
+	while (!a.back() && a.size() > 1) {
+		a.pop_back();
+	}
+}
+
+void big_integer::verify_sign() {
+	if (vec.size() == 1 && !vec.back()) {
+		sgn = true;
+	}
+}
+
+
+void mul_long_short(std::vector<ui64>& a, ui64 base, ui64 b) {
+	ui64 carry = 0;
+	for (int i = 0; i < (int) a.size() || carry; ++i) {
+
+		if (i == (int) a.size()) {
+			a.push_back(0);
+		}
+
+		ui64 val = a[i] * b + carry;
+		a[i] = val % base;
+		carry = val / base;
+	}
+	del_zeros(a);
+}
+
+void div_long_short(std::vector<ui64>& a, ui64 base, ui64 b) {
+	ui64 carry = 0;
+	for (int i = a.size()-1; i >= 0; --i) {
+		ui64 val = a[i] + carry * base;
+
+		a[i] = val / b;
+		carry = val % b;
+	}
+	del_zeros(a);
+}
+
+void add_long_short(std::vector<ui64>& a, ui64 base, ui64 b) {
+	ui64 carry = b;
+	for (int i = 0; carry; ++i) {
+
+		if (i == (int) a.size()) {
+			a.push_back(0);
+		}
+
+		ui64 val = a[i] + carry;
+		a[i] = val % base;
+		carry = val / base;
+	}
+	del_zeros(a);
+}
+
+void big_integer::to_byte() {
+	if (!sgn) {
+        vec.push_back(0);
+		for (auto &x : vec) {
+			x = uint32_t(~x);
+		}
+		sgn = true;
+		++*this;
+	}
+}
+
+void big_integer::from_byte() {
+	if (vec.back() & (1UL << 31)) {
+		--*this;
+		for (auto &x : vec) {
+			x = uint32_t(~x);
+		}
+		sgn = false;
+	} else {
+		sgn = true;
+	}
+}
+
