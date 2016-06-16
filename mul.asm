@@ -25,12 +25,9 @@ _start:
 
                 jmp             exit
 
-; adds two long number
-;    rdi -- address of summand #1 (long number)
-;    rsi -- address of summand #2 (long number)
-;    rcx -- length of long numbers in qwords
-; result:
-;    sum is written to rdi
+
+;rsi, rdi - operands
+;r14 - result
 
 
 mul_long_long:
@@ -401,4 +398,3 @@ print_string:
 invalid_char_msg:
                 db              "Invalid character: "
 invalid_char_msg_size: equ             $ - invalid_char_msg
-
