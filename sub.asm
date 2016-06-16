@@ -3,71 +3,30 @@
                 global          _start
 _start:
 
-                sub     rsp, 2 * 128 * 8
-                mov     rcx, 128
-                mov     rdi, rsp
-                call    read_long
-                lea     rdi, [rsp + 128 * 8]
-                call    read_long
-                mov     rdi, rsp
-                lea     rsi, [rsp + 128 * 8]
-                call    sub_long_long
-                call    write_long
+                sub             rsp, 2 * 128 * 8
+                mov 		rcx, 128
+		lea 		rdi, [rsp + 128 * 8]
+		call 		read_long
+		mov 		rdi, rsp
+		call 		read_long
+		lea 		rdi, [rsp + 128 * 8]
+		mov 		rsi, rsp
+                call            sub_long_long
 
-                mov     al, 0x0a
-                call    write_char
+                call            write_long
+
+                mov             al, 0x0a
+                call            write_char
 
                 jmp             exit
 
-; adds two long number
-;    rdi -- address of summand #1 (long number)
-;    rsi -- address of summand #2 (long number)
-;    rcx -- length of long numbers in qwords
-; result:
-;    sum is written to rdi
+; subtracts two long number
+; rdi is 1-st operand
+; rsi is 2-nd operand	
 
-mul_long_long:
-
-    push rdi
-    push rsi
-    push rcx
-
-    clc
-
-    mov rcx, 128
-.label:
-
-
-
-    dec rcx
-    jnz .label
-
-    pop rcx
-    pop rsi
-    pop rdi
-    ret
-
+; rcx -- length of long numbers in qwords
+; result is written to rdi
 sub_long_long:
-    push    rdi
-    push    rsi
-    push    rcx
-
-    clc
-.rep:
-    mov     rax, [rsi]
-    lea     rsi, [rsi + 8]
-    sbb     [rdi], rax
-    lea     rdi, [rdi + 8]
-    jnz     .rep
-
-    pop     rcx
-    pop     rsi
-    pop     rdi
-    ret
-
-
-
-add_long_long:
                 push            rdi
                 push            rsi
                 push            rcx
@@ -76,7 +35,7 @@ add_long_long:
 .loop:
                 mov             rax, [rsi]
                 lea             rsi, [rsi + 8]
-                adc             [rdi], rax
+                sbb             [rdi], rax
                 lea             rdi, [rdi + 8]
                 dec             rcx
                 jnz             .loop
@@ -122,7 +81,6 @@ mul_long_short:
                 push            rax
                 push            rdi
                 push            rcx
-                push            rsi
 
                 xor             rsi, rsi
 .loop:
@@ -136,7 +94,6 @@ mul_long_short:
                 dec             rcx
                 jnz             .loop
 
-                pop             rsi
                 pop             rcx
                 pop             rdi
                 pop             rax
@@ -289,7 +246,6 @@ write_long:
 read_char:
                 push            rcx
                 push            rdi
-                push            rsi
 
                 sub             rsp, 1
                 xor             rax, rax
@@ -304,7 +260,6 @@ read_char:
                 mov             al, [rsp]
                 add             rsp, 1
 
-                pop             rsi
                 pop             rdi
                 pop             rcx
                 ret
@@ -352,4 +307,3 @@ print_string:
 invalid_char_msg:
                 db              "Invalid character: "
 invalid_char_msg_size: equ             $ - invalid_char_msg
-
